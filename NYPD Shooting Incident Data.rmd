@@ -1,0 +1,314 @@
+---
+title: NYPD Shooting Incident Report
+author: L. Baldridge
+date: 2025-05-21
+output: html_document
+---
+
+```{r setup, include=FALSE}
+    knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. **Introduction**
+
+This document showcases all the necessary steps within the data science process that exemplifies reproducibility. The report will be conducted on the `NYPD Shooting Incident Data (Historic)` dataset, taken from <https://catalog.data.gov/dataset>.
+
+## 1.1 *Dataset Information*
+
+This dataset contains every **recorded shooting incident** that occurred in **New York City** starting from **January 1st, 2006** to the last day of the previous year, **December 31st, 2024**. Each row represents a separate incident and includes information such as the date, time, borough where the incident occurred, coordinates, along with age, race, sex, and age group details for both perpetrator and victim.
+
+
+
+# 2. **Importing Libraries and Dataset**
+
+
+## 2.1 *Importing Tidyverse and Glue*
+```{r import_library, results = "hide", warning=FALSE, message=FALSE}
+library(tidyverse)
+library(glue)
+```
+
+## 2.2 *Importing NYPD Shooting Dataset*
+The dataset was downloaded from the link above and a copy was stored locally and subsequently imported into this R markdown document for further analysis.
+```{r import_dataset}
+nypd_shooting_data <- readr::read_csv("Data\\NYPD_Shooting_Incident_Data__Historic_.csv")
+```
+
+# 3. **Exploratory Data Analysis**
+
+## 3.1 *First Look at the Data*
+First we transform our csv into a **dataframe** so that when we print it, *we can see entries for all available columns* and not just the first few. This will give us a better idea of what information is contained in each column.
+```{r print_dataset}
+nypd_shooting_data <- as.data.frame(nypd_shooting_data)
+print(head(nypd_shooting_data))
+```
+
+## 3.2 *Displaying the Summary of the Dataset*
+```{r summary_data}
+summary(nypd_shooting_data)
+```
+
+## 3.3 *Checking for Missing Data*
+```{r missing_data}
+colSums(is.na(nypd_shooting_data))
+```
+
+# 4. **Tidying and Transforming Data**
+Displaying the first couple of rows shows us that we can filter down our columns as some of the information seems redundant or unnecessary. By checking for missing data, we can also exclude columns that contain a high amount of NAs.
+
+And lastly from our summary we can see that there are multiple columns such as the date column that needs to be transformed into a different type, and others that may be better suited to be transformed into categorical variables.
+
+## 4.1 *Filtering and Transforming Data*
+First we remove all the columns that we do not need. Afterwards, we transform OCCUR_DATE into a date column, INCIDENT_KEY into a character, and BORO as a factor.
+
+```{r filtering_transforming}
+nypd_shooting_data_filtered <- nypd_shooting_data %>%
+    dplyr::select(-c(LOC_OF_OCCUR_DESC, LOC_CLASSFCTN_DESC, X_COORD_CD, Y_COORD_CD, Lon_Lat, JURISDICTION_CODE, PRECINCT)) %>%
+    dplyr::mutate(
+        OCCUR_DATE = lubridate::mdy(OCCUR_DATE),
+        INCIDENT_KEY = as.character(INCIDENT_KEY),
+        BORO = as.factor(BORO),
+    )
+
+```
+
+## 4.2 *Identifying Unique Values*
+By removing LOC_OF_OCCUR_DESC and LOC_CLASSFCTN_DESC, we have removed the columns with the most missing data, but we still have other columns that contain a substantial amount of NAs such as the location and perpetrator description columns. Since these columns contain important information, we want to find a way to keep them. In order to get some idea on these missing values, we will display all the unique values for most of the remaining columns.
+
+``` {r unique_values}
+unique_values <- lapply(nypd_shooting_data_filtered[4:12], unique)
+print(unique_values)
+```
+
+## 4.3 *Strategy for Remaining Missing Values*
+As seen above, we will lose out on possibly valuable information if we simply dropped all columns that contained missing information. So we will instead keep them, and also transform all entries that signify missing information (values like "NONE", "(null)") to be the value NA as well.
+
+``` {r manage_na}
+nypd_shooting_data_tidy <- nypd_shooting_data_filtered %>%
+  mutate(
+    across(
+      c(LOCATION_DESC, PERP_AGE_GROUP, PERP_SEX, PERP_RACE, VIC_AGE_GROUP, VIC_SEX, VIC_RACE),
+      ~ .x %>%
+        dplyr::na_if("NONE") %>% 
+        dplyr::na_if("(null)") %>%   
+        dplyr::na_if("UNKNOWN") %>% 
+        dplyr::na_if("1020") %>%
+        dplyr::na_if("1028") %>%
+        dplyr::na_if("2021") %>%
+        dplyr::na_if("224") %>%
+        dplyr::na_if("940") %>%
+        dplyr::na_if("U") %>%
+        dplyr::na_if("1022")
+    ),
+)
+
+```
+
+Finally, let's verify to make sure that we have successfully converted all placeholders for missing information to actual NA values
+``` {r verify}
+unique_values <- lapply(nypd_shooting_data_tidy[4:12], unique)
+print(unique_values)
+```
+
+# 5. **Visualization and Analysis Part 1**
+
+## 5.1 *Gun Incident Trend Over Time For Each Borough*
+
+### 5.1.A *Creating a Year/Borough Group and Finding Counts*
+``` {r year_borough}
+nypd_shooting_data_yearly <- nypd_shooting_data_tidy %>%
+    mutate(YEAR = year(OCCUR_DATE)) %>%
+    group_by(YEAR, BORO) %>%
+    summarize(year_count = n()) %>%
+    ungroup()
+```
+
+### 5.1.B *Plotting Trend of Gun Incidents for Each Borough*
+``` {r year_borough_plot}
+options(repr.plot.width = 12, repr.plot.height = 8)
+
+ggplot(nypd_shooting_data_yearly, aes(x = YEAR, y = year_count, color = BORO)) +
+    geom_point() +
+    geom_line(aes(group = BORO)) +
+    scale_x_continuous(breaks = unique(nypd_shooting_data_yearly$YEAR)) +
+    labs(title = "Gun Related Incidents Per Year By Borough", x = "Year", y = "Number of Incidents", color = "Borough") +
+    theme(
+        plot.title = element_text(size = 20, face = "bold"),
+        axis.title.x = element_text(size = 18, face = "bold"),
+        axis.title.y = element_text(size = 18, face = "bold"),
+        axis.text.x = element_text(size = 12, face = "bold", angle = 30),
+        axis.text.y = element_text(size = 15, face = "bold"),
+        legend.title = element_text(size = 15, face = "bold"),
+        legend.text = element_text(size = 10, face = "bold")
+    )
+```
+
+From the graph above, we can clearly see that **Brooklyn** and the **Bronx** have the highest rates among all boroughs, with Brooklyn having more incidents early on while things have evened out in the most recent years. It is interesting to see that while some boroughs might be more dangerous than others, there is this overall trend that appears where the rate of incidents was *slowly decreasing over time* then suddenly spiking around the time when the pandemic was in full swing. Fortunately it seems that a return to lower incidents should be expected and if things continue, could improve to levels even lower than 2019.
+
+## 5.2 *Analysis on Brooklyn*
+
+``` {r brooklyn_data_filtering}
+brooklyn_yearly_rate <- nypd_shooting_data_yearly %>%
+    filter(BORO == "BROOKLYN") %>%
+    mutate(year_change = (year_count - lag(year_count)))
+
+brooklyn_negative_rate <- brooklyn_yearly_rate %>%
+    filter(year_change < 0)
+
+brooklyn_positive_rate <- brooklyn_yearly_rate %>%
+    filter(year_change > 0)
+```
+
+### 5.2.A *Looking Closer At Consistent Decrease and Subsequent Highest Increase*
+``` {r brooklyn_lows_highs}
+decreasing_years_sum <- sum(brooklyn_negative_rate$year_change)
+decreasing_years_amount <- length(brooklyn_negative_rate$year_change)
+glue("Since 2006, Brooklyn has had {decreasing_years_amount} years where gun related incidents were lower than the previous period, adding up to a total decline of {decreasing_years_sum} incidents, with an average of{round(decreasing_years_sum/decreasing_years_amount,2)} fewer occurances per year")
+
+max_change <- max(brooklyn_positive_rate$year_change)
+glue("This consistent decline, is made more shocking then when contrasted with the highest annual change the borough experienced in 2020, which saw an alarming increase of {max_change} shooting incidents in a single year")
+```
+
+### 5.2.B *Current Promising Trends*
+``` {r brooklyn_current}
+last_count <- brooklyn_yearly_rate[nrow(brooklyn_yearly_rate), ]$year_count
+mean_count <- mean(brooklyn_yearly_rate$year_count)
+
+glue("The good news is that since then it has once again subsided, with a continuous decline since then, coupled with 2024's number of incidents at {last_count} being lower than the overall mean of {mean_count}")
+```
+
+# 6. **Visualization and Analysis Part 2**
+## 6.1 *Analyzing Relationship Between Perpetrator and Victim Race*
+
+### 6.1.A *Creating Perpetrator/Victim Group and Finding Counts*
+``` {r perp_vic_grouping}
+nypd_shooting_data_race <- nypd_shooting_data_tidy %>%
+    group_by(PERP_RACE, VIC_RACE) %>%
+    summarize(count = n()) %>%
+    ungroup()
+```
+
+### 6.1.B *Creating Perpetrator/Victim Group and Finding Counts*
+Here we drop all the NAs from Victim Race but keep the NAs from Perpetrator Race as it might be able to provide us with some information on what the baseline/general relationship is between an unknown perpetrator and an identified victim. We also mutate the count column to its log form in order to decrease the gap between counts which will help with the visualization.
+``` {r perp_vic_data_tidying}
+nypd_shooting_data_race_tidy <- nypd_shooting_data_race %>%
+    arrange(desc(count)) %>%
+    filter(!is.na(VIC_RACE)) %>%
+    mutate(
+        PERP_RACE = ifelse(is.na(PERP_RACE), "NA_PERP", PERP_RACE)
+    ) %>%
+    mutate(
+        count = log(count),
+        PERP_RACE = as.factor(PERP_RACE),
+        VIC_RACE = as.factor(VIC_RACE)
+    )
+```
+
+### 6.1.C *Heatmap of Perpetrator Race/ Victim Race*
+
+``` {r heatmap_plot}
+options(repr.plot.width = 25, repr.plot.height = 10)
+ggplot(
+    nypd_shooting_data_race_tidy,
+    aes(x = VIC_RACE, y = PERP_RACE, fill = count)
+) +
+    geom_tile(
+        color = "white",
+        linewidth = 0.5
+    ) +
+    scale_fill_gradient(
+        low = "#e8eab7",
+        high = "darkred",
+        name = "Incident Heatmap"
+    ) +
+    labs(
+        title = "Incident Heatmap by Perpetrator Race and Victim Race",
+        y = "Perpetrator Race",
+        x = "Victim Race"
+    ) +
+    theme(
+        plot.title = element_text(size = 15, face = "bold"),
+        axis.title.x = element_text(size = 15, face = "bold"),
+        axis.title.y = element_text(size = 15, face = "bold"),
+        axis.text.x = element_text(size = 5, face = "bold", angle = 35),
+        axis.text.y = element_text(size = 5, face = "bold")
+    )
+```
+
+### 6.1.D *Analysis on Heatmap*
+The main interesting part to note for me is the fact that the *NA_PERP heatmap closely resembles the heatmaps of other higher aggressors**. It could mean that this does represent the general relationship of gun incidents in New York, or that the true makeup of the population of this group is very similar to other high incident aggressors, but without more information, we cannot definitively say.
+
+The other interesting part to note is that while it might be easy to say that African Americans are the most aggressive perpetrators, if we look closely, even if that may be the case, they still also end up being victimzed at a disproportionately higher rate in comparison to other races.
+
+## 6.2 *Analysis on Other Races*
+Ultimately what I find most interesting is the fact that in almost all instances, a specific race will be the aggressor at the highest rate towards someone that is from their own race. This can be seen clearly by filtering the perpetrator/victim grouped dataset and displaying each race one by one.
+
+``` {r filter_by_perpetrator_race}
+filter(nypd_shooting_data_race_tidy, PERP_RACE == "ASIAN / PACIFIC ISLANDER")
+
+filter(nypd_shooting_data_race_tidy, PERP_RACE == "WHITE")
+
+filter(nypd_shooting_data_race_tidy, PERP_RACE == "WHITE HISPANIC")
+
+```
+
+# 7. **Modeling**
+In this section, we will attempt to fit a linear model and find out if the amount of statistical murders are a good predictor of the total annual amount of gun incidents
+
+## 7.1 *Create Yearly Grouping and Column for Counts of Statistical Murder*
+``` {r model_prep}
+nypd_shooting_model_yearly <- nypd_shooting_data_tidy %>%
+    mutate(YEAR = year(OCCUR_DATE))
+
+yearly_summary <- nypd_shooting_model_yearly %>%
+    group_by(YEAR) %>%
+    summarise(
+        total_incidents_per_year = n(),
+        total_murders_per_year = sum(STATISTICAL_MURDER_FLAG, na.rm = TRUE)
+    ) %>%
+    ungroup()
+
+print(head(yearly_summary))
+```
+
+
+## 7.2 *Fit the Linear Model, Print the Summary and Coefficients*
+``` {r linear_model}
+nypd_shooting_murder_model <- lm(total_incidents_per_year ~ total_murders_per_year, data = yearly_summary)
+summary(nypd_shooting_murder_model)
+coefficients(nypd_shooting_murder_model)
+```
+
+Looking at the summary of our model, we see that our median residuals are close to zero, both of our p-values are very low suggesting that this relationship is statistically significant, and a high R-squared of 91% suggest that much of the variance in yearly gun incidents can be explained by the variation in statistical murders. All of these suggest that our model should be a good fit for these variables.
+
+
+## 7.3 *Create Prediction Column and Plot Graph of Actual vs Predicted*
+``` {r predict_and_graph}
+yearly_predictions <- yearly_summary %>%
+  mutate(predictions = predict(nypd_shooting_murder_model))
+
+yearly_predictions %>% ggplot() +
+  geom_point(aes(x = total_murders_per_year, y = total_incidents_per_year), color = "violet") +
+  geom_point(aes(x = total_murders_per_year, y = predictions), color = "orange")
+```
+
+
+
+
+# 8. **Conclusion**
+
+Overall, we were able to gain significant insights surrounding the problem of gun violence within New York city. It seems as if currently, the city is possibly reaching a turning point, where if it keeps incidents low and sustains that level - it could further open up the possibility of even higher levels of safety with regards to gun related incidents but we have also seen that its population was most impacted during a time of great uncertainty when Covid was at the forefront and today, while we might not have a pandemic, many things are still seemingly in flux which could in turn produce chaos reminiscent of what had happened years before. We were able to see how incidents have risen and decline, but much of why it does seems to stem from factors outside of guns themselves but rather might be more closely tied to the population, which makes it hard to guarantee further improvements.
+
+New York's gun problem being tied to each individual that makes up the city is also displayed on the analysis of the relationship between perpetrator and victim race. The ethnic groups that have been marginalized the most in our society should not just be seen as the highest aggressors, but more importantly, are also primary victims as well. Even further, we have seen that same-race tensions tend to be higher for any ethnic group, and as such, this problem is one that affects all of us and not just a selected few. 
+
+As with any analysis on a topic that has a deep societal impact, we are usually left with more questions, especially on what we can do next to improve the situation. How can we ensure the continuation of the current decline in overall incidents? While the most violent boroughs have seen improvement, there has been an uptick in previously safer ones - is there anything that can prevent that from progressing further? What can be done about the disproportionate effects of gun violence in different ethnic groups? Why are same-race incidents predominantly at the top of perpetrator-victim relationships? We might not be able to answer these questions at the moment, but we can hope that by investing further into learning more and finding ways to positively influence the situation, we might at least help create a safer future for New Yorkers.
+
+# 9. **Bias**
+
+The most important factor to consider when thinking about Bias is of course, how the data is sourced and gathered. Due to how inherent racial biases are ingrained in our society - especially in the judiciary and law enforcement space, it can be easy to think of many ways in how incident reports can be manipulated, consciously or subconsciously, to over represent certain neighborhoods or groups of people that might have lead to the results we saw in our analysis. As I do not have much knowledge in the finest details in how these incidents are logged, we can only trust that our data is kept and maintained under a fair and objective point of view.
+
+As for my own personal biases, when I had first thought of the idea to tackle the racial aspect of the relationship between perpetrators and victims, I became a bit hesitant as I did not want the results to cloud my judgement on individuals that I encounter in my day to day. But after objectively going through the analysis, finding the disproportionate level of victimization, and the fact that same-race tension is a matter that affects most of us that I did not even consider previously, I was able to reserve my initial judgments which allowed me to be much more factually informed on the matter at hand.
+
+```{r info}
+sessionInfo()
+```
